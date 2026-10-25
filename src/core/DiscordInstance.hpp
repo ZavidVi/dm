@@ -621,7 +621,7 @@ private:
 	void SendVoiceStateUpdate();
 	void ResetVoiceConnection();
 	void TryConnectVoice();
-	void LoadGuildVoiceStates(Snowflake guild, nlohmann::json& voiceStates);
+	void LoadGuildVoiceStates(Snowflake guild, nlohmann::json& voiceStates, bool bNotify = false);
 
 private:
 	void HandleGuildMemberListUpdate_Sync(Snowflake guild, nlohmann::json& j);

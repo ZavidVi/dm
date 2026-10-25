@@ -55,12 +55,11 @@ void VoiceWebsocket::HandleSocketInit(websocketpp::connection_hdl hdl, AsioSocke
 	if (!GetLocalSettings()->EnableTLSVerification())
 		return;
 
-	WSClient::connection_ptr pConn = m_endpoint.get_con_from_hdl(hdl);
-	std::string host = pConn->get_uri()->get_host();
-
+	// N.B. This is called while the connection is still being created, which is too early to ask
+	// websocketpp for it by its handle.
 	socket.set_verify_mode(websocketpp::lib::asio::ssl::verify_peer);
 
-	if (!SSL_set_tlsext_host_name(reinterpret_cast<SSL*>(socket.native_handle()), host.c_str()))
+	if (!SSL_set_tlsext_host_name(reinterpret_cast<SSL*>(socket.native_handle()), m_host.c_str()))
 		DbgPrintF("VoiceWebsocket: Failed to set SNI host name... this might go awry");
 }
 
@@ -77,12 +76,17 @@ void VoiceWebsocket::HandleFail(websocketpp::connection_hdl hdl)
 {
 	m_bOpen = false;
 
-	WSClient::connection_ptr pConn = m_endpoint.get_con_from_hdl(hdl);
-	std::string reason = pConn->get_ec().message();
+	std::string reason = "connection failed";
 
-	auto transportEc = pConn->get_transport_ec();
-	if (transportEc)
-		reason += " (" + transportEc.message() + ")";
+	WSClient::connection_ptr pConn = m_endpoint.get_con_from_hdl(hdl);
+	if (pConn)
+	{
+		reason = pConn->get_ec().message();
+
+		auto transportEc = pConn->get_transport_ec();
+		if (transportEc)
+			reason += " (" + transportEc.message() + ")";
+	}
 
 	DbgPrintF("VoiceWebsocket: connection failed: %s", reason.c_str());
 
@@ -97,9 +101,15 @@ void VoiceWebsocket::HandleClose(websocketpp::connection_hdl hdl)
 {
 	m_bOpen = false;
 
+	int code = 0;
+	std::string reason;
+
 	WSClient::connection_ptr pConn = m_endpoint.get_con_from_hdl(hdl);
-	int code = pConn->get_remote_close_code();
-	std::string reason = pConn->get_remote_close_reason();
+	if (pConn)
+	{
+		code = pConn->get_remote_close_code();
+		reason = pConn->get_remote_close_reason();
+	}
 
 	DbgPrintF("VoiceWebsocket: closed with code %d (%s)", code, reason.c_str());
 
@@ -132,6 +142,7 @@ bool VoiceWebsocket::Connect(const std::string& host, const std::string& path, L
 		return false;
 
 	m_pListener = pListener;
+	m_host = host;
 
 	m_endpoint.clear_access_channels(websocketpp::log::alevel::all);
 	m_endpoint.clear_error_channels(websocketpp::log::elevel::all);

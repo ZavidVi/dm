@@ -55,6 +55,7 @@ private:
 	WSThreadSharedPtr m_thread;
 	websocketpp::connection_hdl m_hdl;
 	Listener* m_pListener;
+	std::string m_host; // for the SNI, the connection is not known yet when the socket gets initialized
 	volatile bool m_bOpen;
 	volatile bool m_bRunDone;
 	volatile bool m_bReported;

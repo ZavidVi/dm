@@ -1296,6 +1296,8 @@ void DiscordInstance::HandleGatewayMessage(const std::string& payload)
 			std::string dispatchCode = j["t"];
 			m_heartbeatSequenceId = j["s"];
 
+			VoiceDebugLogPayload(dispatchCode, payload);
+
 			DispatchFunction df = g_dispatchFunctions[dispatchCode];
 			if (!df)
 			{
@@ -2381,7 +2383,13 @@ void DiscordInstance::HandleREADY_SUPPLEMENTAL(Json& j)
 
 	Json& guilds = data["guilds"];
 	for (int i = 0; i < int(guilds.size()); i++)
+	{
 		guildsVec.push_back(GetSnowflake(guilds[i], "id"));
+
+		// Those who were in voice channels before we connected are listed here.
+		if (guilds[i].contains("voice_states"))
+			LoadGuildVoiceStates(guildsVec.back(), guilds[i]["voice_states"], true);
+	}
 
 	Json& mergedPresences = data["merged_presences"];
 
@@ -3072,6 +3080,9 @@ void DiscordInstance::HandlePASSIVE_UPDATE_V1(nlohmann::json& j)
 	Guild* pGld = GetGuild(guildId);
 	if (!pGld)
 		return;
+
+	if (data.contains("voice_states"))
+		LoadGuildVoiceStates(guildId, data["voice_states"], true);
 	
 	if (!data["channels"].is_array())
 		return;
@@ -3404,12 +3415,32 @@ bool DiscordInstance::SendMessageAndAttachmentToCurrentChannel(
 
 // ==== Voice ====
 
-void DiscordInstance::LoadGuildVoiceStates(Snowflake guild, Json& voiceStates)
+void DiscordInstance::LoadGuildVoiceStates(Snowflake guild, Json& voiceStates, bool bNotify)
 {
-	m_voiceStates.RemoveGuild(guild);
-
 	if (!voiceStates.is_array())
 		return;
+
+	// The channels that had people in them, or have now, need to be told about it.
+	std::set<Snowflake> affected;
+	if (bNotify)
+	{
+		affected = m_voiceStates.GetChannelsOfGuild(guild);
+
+		for (auto& vsj : voiceStates)
+			affected.insert(GetSnowflake(vsj, "channel_id"));
+	}
+
+	// If we're in voice here, that's something the list that arrived may not know about yet.
+	VoiceState ourState;
+	bool bHadOurState = false;
+	const VoiceState* pOurState = m_voiceStates.Get(m_mySnowflake);
+	if (pOurState && pOurState->m_guildId == guild && m_voiceChannel != 0)
+	{
+		ourState = *pOurState;
+		bHadOurState = true;
+	}
+
+	m_voiceStates.RemoveGuild(guild);
 
 	for (auto& vsj : voiceStates)
 	{
@@ -3418,6 +3449,15 @@ void DiscordInstance::LoadGuildVoiceStates(Snowflake guild, Json& voiceStates)
 
 		if (vs.m_userId && vs.m_channelId)
 			m_voiceStates.Update(vs);
+	}
+
+	if (bHadOurState && !m_voiceStates.Get(m_mySnowflake))
+		m_voiceStates.Update(ourState);
+
+	for (Snowflake channel : affected)
+	{
+		if (channel)
+			GetFrontend()->OnVoiceStatesChanged(guild, channel);
 	}
 }
 

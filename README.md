@@ -270,6 +270,14 @@ msbuild vs\DiscordMessenger.sln /p:Configuration=Release /p:Platform=x64 /p:Enab
 
 For MinGW, build the libraries on your own, and run make with `VOICE=yes VOICE_LIB_DIR=[where they are]`.
 
+### Debugging voice
+
+If something doesn't work, create an empty file named `voice-debug.enabled` next to the executable.
+The gateway events that have to do with voice are then written to `voice-debug.log` there (this includes
+user IDs and names, so look before sharing it).  Delete the file to turn it off again.  If the program
+crashes, the message box lists the call stack as offsets into the executable, which can be looked up in
+the `.pdb` file that is built along with it.
+
 ### How it works
 
 The main gateway tells the client who is in which voice channel (`VOICE_STATE_UPDATE`), and, after

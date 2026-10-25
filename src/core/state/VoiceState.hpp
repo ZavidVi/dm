@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <nlohmann/json.h>
@@ -22,6 +23,10 @@ struct VoiceConnectParams
 		return m_guildId ? m_guildId : m_channelId;
 	}
 };
+
+// Debugging aid for voice: if a file named voice-debug.enabled exists next to the program, the
+// gateway events that have to do with voice are written to voice-debug.log next to it.
+void VoiceDebugLogPayload(const std::string& dispatchCode, const std::string& payload);
 
 // State of a single user that is connected to a voice channel, or to a call in a DM or group DM.
 struct VoiceState
@@ -63,6 +68,9 @@ public:
 	std::vector<Snowflake> GetUsersInChannel(Snowflake channel) const;
 
 	int GetUserCountInChannel(Snowflake channel) const;
+
+	// Gets the channels of a guild that have someone in them.
+	std::set<Snowflake> GetChannelsOfGuild(Snowflake guild) const;
 
 	// Forgets states related to a guild (when leaving it), a channel (when it is
 	// deleted or a call ends), or everything (when logging off).

@@ -343,6 +343,50 @@ bool FindLoadedDLLsAutomatically()
 }
 
 
+#ifdef _WIN64
+// Walks the stack of the thread that crashed using the unwind information of the x64 ABI, and
+// writes where each frame is, as module and offset, so it can be looked up in the PDB later.
+static void BuildUnwindTrace(CONTEXT ctx, char* out, size_t outSize)
+{
+	snprintf(out, outSize, "Image base: %p\nCall stack (address, module+offset):\n", (void*) GetModuleHandleA(NULL));
+
+	for (int i = 0; i < 40; i++)
+	{
+		HMODULE hMod = NULL;
+		char name[MAX_PATH] = "?";
+		if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR) ctx.Rip, &hMod) && hMod)
+			GetModuleFileNameA(hMod, name, sizeof name);
+
+		char line[MAX_PATH + 64];
+		snprintf(line, sizeof line, "  %p  %s+0x%llx\n", (void*) ctx.Rip, TrimPathComponents(name), (unsigned long long)(ctx.Rip - (DWORD64) hMod));
+		if (strlen(out) + strlen(line) + 1 >= outSize)
+			break;
+		strcat(out, line);
+
+		DWORD64 imageBase = 0;
+		PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &imageBase, NULL);
+		if (!fn)
+		{
+			// A function without unwind information, which can only be a leaf: its return address is on top of the stack.
+			DWORD64 ret = 0;
+			if (!SafeMemcpy(&ret, (void*) ctx.Rsp, sizeof ret))
+				break;
+			ctx.Rip = ret;
+			ctx.Rsp += 8;
+		}
+		else
+		{
+			PVOID handlerData = NULL;
+			DWORD64 establisherFrame = 0;
+			RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx, &handlerData, &establisherFrame, NULL);
+		}
+
+		if (!ctx.Rip)
+			break;
+	}
+}
+#endif
+
 LONG WINAPI DMUnhandledExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo)
 {
 	// Is this NT status not an "error"
@@ -358,6 +402,9 @@ LONG WINAPI DMUnhandledExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo)
 		something = " (https://www.youtube.com/watch?v=bLHL75H_VEM)";
 
 #ifdef _WIN64
+	static char unwindTrace[4096];
+	BuildUnwindTrace(*cr, unwindTrace, sizeof unwindTrace);
+
 	AbortMessage(
 		"Oops! DiscordMessenger (x64) just crashed!\n\n"
 		"Thread ID: %u\n"
@@ -368,7 +415,7 @@ LONG WINAPI DMUnhandledExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo)
 		"RAX=%p RBX=%p RCX=%p RDX=%p\n"
 		"RSI=%p RDI=%p RSP=%p RBP=%p\n"
 		"R8 =%p R9 =%p R10=%p R11=%p\n"
-		"R12=%p R13=%p R14=%p R15=%p\n",
+		"R12=%p R13=%p R14=%p R15=%p\n\n%s\n",
 		GetCurrentThreadId(),
 		er->ExceptionCode,
 		er->ExceptionAddress,
@@ -379,7 +426,8 @@ LONG WINAPI DMUnhandledExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo)
 		cr->Rax, cr->Rbx, cr->Rcx, cr->Rdx,
 		cr->Rsi, cr->Rdi, cr->Rsp, cr->Rbp,
 		cr->R8,  cr->R9,  cr->R10, cr->R11,
-		cr->R12, cr->R13, cr->R14, cr->R15
+		cr->R12, cr->R13, cr->R14, cr->R15,
+		unwindTrace
 	);
 #else
 	AbortMessage(

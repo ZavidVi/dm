@@ -6,6 +6,7 @@
 DEBUG               ?= yes   # yes = build debug with symbols, no = release
 UNICODE             ?= yes   # yes = build Unicode, no = ANSI
 IS_MINGW_ON_WINDOWS ?= no    # yes if compiling on native Windows with MinGW
+VOICE               ?= no    # yes = build with voice channels and calls, needs Opus and DAVE (see README)
 
 # Optional environment overrides
 USER_INC_DIRS ?=
@@ -59,6 +60,7 @@ endif
 $(info Discord Messenger makefile)
 $(info Debug: $(DEBUG))
 $(info Unicode: $(UNICODE))
+$(info Voice: $(VOICE))
 # -----------------------------
 # Include and library paths
 # -----------------------------
@@ -168,6 +170,17 @@ else
 	LDFLAGS  += -lwebp
 endif
 
+# Optional voice support.  The libraries (Opus, and MLS and DAVE with their dependencies) are not
+# built by this makefile, VOICE_LIB_DIR is where they are to be found.  They need a C++17 capable
+# compiler, so voice is not available for the oldest Windows versions that this makefile can target.
+VOICE_LIB_DIR ?= build-voice/lib
+ifeq ($(VOICE),yes)
+	DEFINES  += -DENABLE_VOICE
+	INC_DIRS += -Ideps/opus/include -Ideps/libdave/cpp/includes
+	LIB_DIRS += -L$(VOICE_LIB_DIR)
+	LDFLAGS  += -lopus -llibdave -lmlspp -lhpke -lbytes -ltls_syntax -lwinmm
+endif
+
 # Resource compiler flags
 WRFLAGS = -Ihacks
 
@@ -183,6 +196,11 @@ AUX_CXXFILES = \
 
 # All source files
 CXXFILES := $(shell $(FIND) $(SRC_DIR) -not -path '*/.*' -type f -name '*.cpp') $(AUX_CXXFILES)
+
+# Without voice support, only the stand-in for the voice engine is part of the build.
+ifneq ($(VOICE),yes)
+	CXXFILES := $(filter-out $(filter-out $(SRC_DIR)/voice/VoiceEngine.cpp,$(wildcard $(SRC_DIR)/voice/*.cpp)),$(CXXFILES))
+endif
 RESFILES := $(shell $(FIND) $(SRC_DIR) -not -path '*/.*' -type f -name '*.rc')
 
 # Objects and dependency files

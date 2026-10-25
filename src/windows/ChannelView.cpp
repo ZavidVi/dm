@@ -1,4 +1,5 @@
 #include "ChannelView.hpp"
+#include "VoicePanel.hpp"
 #include <tchar.h>
 
 #define CX_BITMAP (16)
@@ -333,6 +334,46 @@ bool IsChannelASubThread(Channel::eChannelType x)
 
 static UINT g_columnIndices[] = { 1 };
 
+// The name of a channel as shown in the list, with the number of people in it if it's a voice channel.
+static std::string GetDisplayName(const Channel& ch)
+{
+	if (!ch.IsVoice())
+		return ch.m_name;
+
+	int count = GetDiscordInstance()->GetVoiceStates().GetUserCountInChannel(ch.m_snowflake);
+	if (count == 0)
+		return ch.m_name;
+
+	return ch.m_name + " (" + std::to_string(count) + ")";
+}
+
+void ChannelView::UpdateVoiceUsers(Snowflake channel)
+{
+	if (!TreeMode())
+		return;
+
+	auto iter = m_idToIdx.find(channel);
+	if (iter == m_idToIdx.end() || iter->second < 0 || iter->second >= int(m_channels.size()))
+		return;
+
+	ChannelMember& member = m_channels[iter->second];
+	Channel* pChan = GetDiscordInstance()->GetChannel(channel);
+	if (!member.m_hItem || !pChan || !pChan->IsVoice())
+		return;
+
+	LPTSTR text = ConvertCppStringToTString(GetDisplayName(*pChan));
+	_tcsncpy(member.str, text, _countof(member.str));
+	member.str[_countof(member.str) - 1] = 0;
+	free(text);
+
+	TVITEM item;
+	ZeroMemory(&item, sizeof item);
+	item.hItem = member.m_hItem;
+	item.mask = TVIF_TEXT;
+	item.pszText = member.str;
+	TreeView_SetItem(m_treeHwnd, &item);
+}
+
 void ChannelView::AddChannel(const Channel & ch)
 {
 	if (!ch.HasPermissionConst(PERM_VIEW_CHANNEL))
@@ -347,7 +388,7 @@ void ChannelView::AddChannel(const Channel & ch)
 	cmem.m_childCount = 0;
 	cmem.m_snowflake = ch.m_snowflake;
 
-	const TCHAR* ptr = (const TCHAR*)ConvertCppStringToTString(ch.m_name);
+	const TCHAR* ptr = (const TCHAR*)ConvertCppStringToTString(GetDisplayName(ch));
 	_tcsncpy(cmem.str, ptr, _countof(cmem.str));
 	cmem.str[_countof(cmem.str) - 1] = 0; // Ensure that it is null terminated. tcsncpy doesn't.
 	free((void*)ptr);
@@ -532,6 +573,34 @@ bool ChannelView::OnNotifyTree(LRESULT& out, WPARAM wParam, LPARAM lParam)
 			if (!hItem) break;
 
 			SetItemIcon(hItem, nmtv->action == TVE_EXPAND ? m_nCategoryCollapseIcon : m_nCategoryExpandIcon);
+			break;
+		}
+		case NM_DBLCLK:
+		{
+			// Double clicking a voice channel joins it.
+			TVHITTESTINFO hti;
+			ZeroMemory(&hti, sizeof hti);
+			GetCursorPos(&hti.pt);
+			ScreenToClient(m_treeHwnd, &hti.pt);
+
+			HTREEITEM hHit = TreeView_HitTest(m_treeHwnd, &hti);
+			if (!hHit || !(hti.flags & TVHT_ONITEM))
+				break;
+
+			TVITEM item;
+			ZeroMemory(&item, sizeof item);
+			item.hItem = hHit;
+			item.mask = TVIF_PARAM;
+			if (!TreeView_GetItem(m_treeHwnd, &item)) break;
+
+			size_t idx = size_t(item.lParam);
+			if (idx >= m_channels.size())
+				break;
+
+			Channel* pChan = GetDiscordInstance()->GetChannel(m_channels[idx].m_snowflake);
+			if (pChan && pChan->IsVoice())
+				VoiceUIJoinChannel(pChan->m_parentGuild, pChan->m_snowflake);
+
 			break;
 		}
 		case TVN_SELCHANGED:

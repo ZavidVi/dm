@@ -61,6 +61,7 @@ public:
 	HWND GetListHWND() override { return m_listHwnd; }
 	HWND GetTreeHWND() override { return m_treeHwnd; }
 	void CommitChannels() override {}
+	void UpdateVoiceUsers(Snowflake channel) override;
 
 public:
 	void SetItemIcon(HTREEITEM hItem, int icon);

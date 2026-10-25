@@ -88,6 +88,10 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "New Group &DM...",            ID_ACTIONS_NEWGROUPDM, GRAYED
         MENUITEM "Add &Friend...",              ID_ACTIONS_ADDFRIEND, GRAYED
+        MENUITEM SEPARATOR
+        MENUITEM "&Join Voice Channel",         ID_ACTIONS_JOINVOICE, GRAYED
+        MENUITEM "Start &Call",                 ID_ACTIONS_STARTCALL, GRAYED
+        MENUITEM "&Leave Voice / Hang Up",      ID_ACTIONS_LEAVEVOICE, GRAYED
     END
     POPUP "A&ccount"
     BEGIN
@@ -1717,6 +1721,29 @@ BEGIN
     IDS_CONFIRM_UNPIN       "You sure you want to remove this pinned message?\n\n%s (%s)\n\n%s"
     IDS_CONFIRM_UNPIN_TITLE "Discord Messenger - Unpin Message"
     IDS_ETA_STRING_DOWNLOADED "(%s (%s downloaded)"
+    IDS_VOICE_TITLE         "Voice"
+    IDS_VOICE_CONNECTING    "Connecting..."
+    IDS_VOICE_CONNECTED     "Voice Connected"
+    IDS_VOICE_RECONNECTING  "Connection lost, reconnecting..."
+    IDS_VOICE_MUTE          "&Mute"
+    IDS_VOICE_UNMUTE        "&Unmute"
+    IDS_VOICE_DEAFEN        "&Deafen"
+    IDS_VOICE_UNDEAFEN      "Un&deafen"
+    IDS_VOICE_DISCONNECT    "Dis&connect"
+    IDS_VOICE_NOT_AVAILABLE "This build of Discord Messenger was made without voice support.
+
+Voice needs a build that includes the Opus and DAVE libraries, see the README for how to make one."
+    IDS_VOICE_ERROR         "The voice connection ended with an error:
+
+%s"
+    IDS_VOICE_NO_MICROPHONE "No microphone could be opened, so others won't be able to hear you."
+    IDS_VOICE_CALL_WITH     "Call"
+    IDS_VOICE_MUTED_SUFFIX  " (muted)"
+    IDS_VOICE_DEAFENED_SUFFIX " (deafened)"
+    IDS_VOICE_NO_PERMISSION "You don't have permission to join this voice channel."
+    IDS_VOICE_INCOMING_CALL "%s is calling you.
+
+Do you want to join the call?"
 END
 
 #endif    // English (United States) resources

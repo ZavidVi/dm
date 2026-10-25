@@ -11,6 +11,8 @@
 #include "NotificationViewer.hpp"
 #include "utils/UpdateChecker.hpp"
 #include "config/LocalSettings.hpp"
+#include "VoicePanel.hpp"
+#include "voice/VoiceEngine.hpp"
 
 void Frontend_Win32::OnLoginAgain()
 {
@@ -195,6 +197,39 @@ void Frontend_Win32::OnStopProgress(Snowflake key)
 void Frontend_Win32::OnNotification()
 {
 	GetShellNotification()->OnNotification();
+}
+
+void Frontend_Win32::OnVoiceStatesChanged(Snowflake guildID, Snowflake channelID)
+{
+	// Gateway messages are handled on the main thread, which is also where the panel lives.
+	if (channelID == GetDiscordInstance()->GetVoiceChannelID())
+		VoicePanel::Refresh();
+
+	// Voice channels in the list say how many people are in them.
+	if (guildID == GetDiscordInstance()->GetCurrentGuildID())
+		SendMessage(g_Hwnd, WM_UPDATEVOICEUSERS, 0, (LPARAM) &channelID);
+}
+
+void Frontend_Win32::OnVoiceConnect(const VoiceConnectParams& params)
+{
+	std::vector<Snowflake> inChannel = GetDiscordInstance()->GetVoiceStates().GetUsersInChannel(params.m_channelId);
+	std::set<Snowflake> users(inChannel.begin(), inChannel.end());
+
+	VoiceEngine::Connect(params, users);
+	VoicePanel::Refresh();
+}
+
+void Frontend_Win32::OnVoiceDisconnect()
+{
+	VoiceEngine::Disconnect();
+	VoicePanel::Hide();
+}
+
+void Frontend_Win32::OnIncomingCall(Snowflake channelID)
+{
+	// Asking the user takes a while, so it's left to the main window to do once this message is over with.
+	Snowflake* pChannel = new Snowflake(channelID);
+	PostMessage(g_Hwnd, WM_INCOMINGCALL, 0, (LPARAM) pChannel);
 }
 
 void Frontend_Win32::OnAttachmentDownloaded(bool bIsProfilePicture, const uint8_t* pData, size_t nSize, const std::string& additData)

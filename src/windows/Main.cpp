@@ -21,6 +21,7 @@
 #include "UploadDialog.hpp"
 #include "StatusBar.hpp"
 #include "QuickSwitcher.hpp"
+#include "VoicePanel.hpp"
 #include "Frontend_Win32.hpp"
 #include "ProgressDialog.hpp"
 #include "AutoComplete.hpp"
@@ -31,6 +32,7 @@
 #include "config/LocalSettings.hpp"
 #include "network/WebsocketClient.hpp"
 #include "utils/UpdateChecker.hpp"
+#include "voice/VoiceEngine.hpp"
 
 #include <system_error>
 #include <shellapi.h>
@@ -484,6 +486,8 @@ int OnHTTPError(const std::string& url, const std::string& reasonString, bool is
 
 void CloseCleanup(HWND hWnd)
 {
+	VoicePanel::Hide();
+	VoiceEngine::Disconnect();
 	KillImageViewer();
 	ProfilePopout::Dismiss();
 	AutoComplete::DismissAutoCompleteWindowsIfNeeded(hWnd);
@@ -574,6 +578,35 @@ LRESULT HandleCommand(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case ID_ACTIONS_QUICKSWITCHER:
 		{
 			QuickSwitcher::ShowDialog();
+			break;
+		}
+		case ID_ACTIONS_JOINVOICE:
+		{
+			Channel* pChan = GetDiscordInstance()->GetCurrentChannel();
+			if (pChan && pChan->IsVoice())
+				VoiceUIJoinChannel(pChan->m_parentGuild, pChan->m_snowflake);
+			break;
+		}
+		case ID_ACTIONS_STARTCALL:
+		{
+			Channel* pChan = GetDiscordInstance()->GetCurrentChannel();
+			if (pChan && pChan->IsDM())
+				VoiceUIStartCall(pChan->m_snowflake);
+			break;
+		}
+		case ID_ACTIONS_LEAVEVOICE:
+		{
+			VoiceUIHangUp();
+			break;
+		}
+		case ID_ACCOUNT_UNMUTE:
+		{
+			VoiceUIToggleMute();
+			break;
+		}
+		case ID_ACCOUNT_DEAFEN:
+		{
+			VoiceUIToggleDeafen();
 			break;
 		}
 		case IDA_PASTE:
@@ -1445,6 +1478,32 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			HMENU Menu = (HMENU)wParam;
 			int firstMenuItem = GetMenuItemID(Menu, 0);
 
+			// The voice items live in the Actions and Account menus, whose first items don't identify them.
+			if (GetMenuState(Menu, ID_ACTIONS_JOINVOICE, MF_BYCOMMAND) != (UINT) -1)
+			{
+				DiscordInstance* pInstance = GetDiscordInstance();
+				Channel* pChan = pInstance->GetCurrentChannel();
+				bool bInVoice = pInstance->IsInVoice();
+				bool bConnected = pInstance->IsGatewayConnected();
+
+				EnableMenuItem(Menu, ID_ACTIONS_JOINVOICE,  (bConnected && pChan && pChan->IsVoice() && pChan->m_snowflake != pInstance->GetVoiceChannelID()) ? MF_ENABLED : MF_GRAYED);
+				EnableMenuItem(Menu, ID_ACTIONS_STARTCALL,  (bConnected && pChan && pChan->IsDM() && pChan->m_snowflake != pInstance->GetVoiceChannelID()) ? MF_ENABLED : MF_GRAYED);
+				EnableMenuItem(Menu, ID_ACTIONS_LEAVEVOICE, bInVoice ? MF_ENABLED : MF_GRAYED);
+			}
+
+			if (GetMenuState(Menu, ID_ACCOUNT_UNMUTE, MF_BYCOMMAND) != (UINT) -1)
+			{
+				DiscordInstance* pInstance = GetDiscordInstance();
+				bool bInVoice = pInstance->IsInVoice();
+				bool bDeaf = pInstance->IsVoiceSelfDeafened();
+				bool bMute = pInstance->IsVoiceSelfMuted() && !bDeaf;
+
+				ModifyMenu(Menu, ID_ACCOUNT_UNMUTE, MF_BYCOMMAND | MF_STRING | (bInVoice ? MF_ENABLED : MF_GRAYED), ID_ACCOUNT_UNMUTE,
+					TmGetTString(bMute ? IDS_VOICE_UNMUTE : IDS_VOICE_MUTE));
+				ModifyMenu(Menu, ID_ACCOUNT_DEAFEN, MF_BYCOMMAND | MF_STRING | (bInVoice ? MF_ENABLED : MF_GRAYED), ID_ACCOUNT_DEAFEN,
+					TmGetTString(bDeaf ? IDS_VOICE_UNDEAFEN : IDS_VOICE_DEAFEN));
+			}
+
 			switch (firstMenuItem)
 			{
 				case ID_ONLINESTATUSPLACEHOLDER_ONLINE:
@@ -1719,6 +1778,60 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case WM_NOTIFMANAGERCALLBACK:
 		{
 			GetShellNotification()->Callback(wParam, lParam);
+			break;
+		}
+		case WM_UPDATEVOICEUSERS:
+		{
+			if (g_pChannelView)
+				g_pChannelView->UpdateVoiceUsers(*(Snowflake*) lParam);
+			break;
+		}
+		case WM_INCOMINGCALL:
+		{
+			Snowflake* pChannel = (Snowflake*) lParam;
+			Snowflake channel = *pChannel;
+			delete pChannel;
+
+			DiscordInstance* pInstance = GetDiscordInstance();
+			Channel* pChan = pInstance->GetChannel(channel);
+			if (!pChan || pInstance->IsInVoice() || !VoiceEngine::IsAvailable())
+				break;
+
+			std::string name = pChan->m_name;
+			if (pChan->m_channelType == Channel::DM)
+				name = GetProfileCache()->LookupProfile(pChan->GetDMRecipient(), "", "", "", false)->GetName(0);
+
+			TCHAR buf[1024];
+			LPTSTR tstr = ConvertCppStringToTString(name);
+			WAsnprintf(buf, _countof(buf), TmGetTString(IDS_VOICE_INCOMING_CALL), tstr);
+			buf[_countof(buf) - 1] = 0;
+			free(tstr);
+
+			if (MessageBox(hWnd, buf, TmGetTString(IDS_PROGRAM_NAME), MB_ICONQUESTION | MB_YESNO) == IDYES)
+				VoiceUIJoinChannel(0, channel);
+			break;
+		}
+		case WM_VOICEENGINESTOPPED:
+		{
+			bool bFailed = lParam != 0;
+			if (!VoiceEngine::OnStopped((unsigned) wParam, bFailed))
+				break; // that was an older connection, long gone
+
+			std::string error = VoiceEngine::GetErrorText();
+
+			// Get out of the channel too, there's no point in staying without anything to talk through.
+			GetDiscordInstance()->OnVoiceEngineStopped();
+
+			if (bFailed)
+			{
+				TCHAR buf[2048];
+				LPTSTR tstr = ConvertCppStringToTString(error);
+				WAsnprintf(buf, _countof(buf), TmGetTString(IDS_VOICE_ERROR), tstr);
+				buf[_countof(buf) - 1] = 0;
+				free(tstr);
+
+				MessageBox(hWnd, buf, TmGetTString(IDS_PROGRAM_NAME), MB_ICONERROR | MB_OK);
+			}
 			break;
 		}
 		case WM_RESTOREAPP:

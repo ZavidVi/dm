@@ -27,6 +27,10 @@ public:
 	bool OnUpdateProgress(Snowflake key, size_t offset, size_t length);
 	void OnStopProgress(Snowflake key);
 	void OnNotification();
+	void OnVoiceStatesChanged(Snowflake guildID, Snowflake channelID) override;
+	void OnVoiceConnect(const VoiceConnectParams& params) override;
+	void OnVoiceDisconnect() override;
+	void OnIncomingCall(Snowflake channelID) override;
 	void OnGenericError(const std::string& message) override;
 	void OnJsonException(const std::string& message) override;
 	void OnCantViewChannel(const std::string& channelName) override;

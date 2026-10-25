@@ -496,6 +496,11 @@ void DiscordInstance::HandleRequest(NetRequest* pRequest)
 		return;
 	}
 
+	if (pRequest->itype == DiscordRequest::CALL_RING) {
+		// Nothing to do, whether or not the other side's phone rang.
+		return;
+	}
+
 	using namespace DiscordRequest;
 
 	// if we didn't get a 200, authentication is invalid and we should exit.
@@ -1730,6 +1735,11 @@ void DiscordInstance::ClearData()
 	m_channelDenyList.clear();
 	m_relationships.clear();
 
+	ResetVoiceConnection();
+	m_voiceStates.Clear();
+	m_bVoiceSelfMute = false;
+	m_bVoiceSelfDeaf = false;
+
 	m_mySnowflake = 0;
 	m_CurrentGuild = 0;
 	m_CurrentChannel = 0;
@@ -2293,6 +2303,10 @@ void DiscordInstance::ParseAndAddGuild(nlohmann::json& elem)
 		g.m_emoji[emoji.m_id] = emoji;
 	}
 
+	// Remember who is sitting in the voice channels of this guild.
+	if (elem.contains("voice_states"))
+		LoadGuildVoiceStates(g.m_snowflake, elem["voice_states"]);
+
 	// Check if the guild already exists.  If it does, replace its contents.
 	// I'm not totally sure why discord sends a GUILD_CREATE event.  Perhaps
 	// the server I was testing with is considered a "lazy guild"?
@@ -2333,6 +2347,11 @@ void DiscordInstance::InitDispatchFunctions()
 	DECL(TYPING_START);
 	DECL(PRESENCE_UPDATE);
 	DECL(PASSIVE_UPDATE_V1);
+	DECL(VOICE_STATE_UPDATE);
+	DECL(VOICE_SERVER_UPDATE);
+	DECL(CALL_CREATE);
+	DECL(CALL_UPDATE);
+	DECL(CALL_DELETE);
 
 	m_dmGuild.m_name = GetFrontend()->GetDirectMessagesText();
 }
@@ -2448,6 +2467,10 @@ void DiscordInstance::HandleREADY(Json& j)
 	// ==== reload guild DB
 	Json& guilds = data["guilds"];
 	m_guilds.clear();
+
+	// A new session cannot continue the voice connection of the old one.
+	ResetVoiceConnection();
+	m_voiceStates.Clear();
 
 	std::vector<Snowflake> guildIds; // used by merged members
 	for (auto& elem : guilds) {
@@ -2779,6 +2802,10 @@ void DiscordInstance::HandleGUILD_DELETE(Json& j)
 	{
 		if (iter->m_snowflake == sf)
 		{
+			m_voiceStates.RemoveGuild(sf);
+			if (m_voiceGuild == sf)
+				ResetVoiceConnection();
+
 			m_guilds.erase(iter);
 			m_guildItemList.EraseGuild(sf);
 			GetFrontend()->RepaintGuildList();
@@ -2868,6 +2895,10 @@ void DiscordInstance::HandleCHANNEL_DELETE(Json& j)
 			break;
 		}
 	}
+
+	m_voiceStates.RemoveChannel(channelId);
+	if (m_voiceChannel == channelId)
+		ResetVoiceConnection();
 
 	if (m_CurrentChannel == channelId)
 		OnSelectChannel(0);
@@ -3369,4 +3400,336 @@ bool DiscordInstance::SendMessageAndAttachmentToCurrentChannel(
 
 	m_nextAttachmentID++;
 	return true;
+}
+
+// ==== Voice ====
+
+void DiscordInstance::LoadGuildVoiceStates(Snowflake guild, Json& voiceStates)
+{
+	m_voiceStates.RemoveGuild(guild);
+
+	if (!voiceStates.is_array())
+		return;
+
+	for (auto& vsj : voiceStates)
+	{
+		VoiceState vs;
+		vs.Load(vsj, guild);
+
+		if (vs.m_userId && vs.m_channelId)
+			m_voiceStates.Update(vs);
+	}
+}
+
+void DiscordInstance::SendVoiceStateUpdate()
+{
+	using namespace GatewayOp;
+
+	Json d;
+	d["guild_id"]   = m_voiceGuild   ? Json(std::to_string(m_voiceGuild))   : Json(nullptr);
+	d["channel_id"] = m_voiceChannel ? Json(std::to_string(m_voiceChannel)) : Json(nullptr);
+
+	// Like the official client, being deafened also shows up as being muted.
+	d["self_mute"]  = m_bVoiceSelfMute || m_bVoiceSelfDeaf;
+	d["self_deaf"]  = m_bVoiceSelfDeaf;
+	d["self_video"] = false;
+
+	Json j;
+	j["op"] = VOICE_STATE_UPDATE;
+	j["d"] = d;
+
+	GetWebsocketClient()->SendMsg(m_gatewayConnId, j.dump());
+}
+
+void DiscordInstance::ResetVoiceConnection()
+{
+	bool wasInVoice = m_voiceChannel != 0;
+
+	m_voiceGuild = 0;
+	m_voiceChannel = 0;
+	m_voiceSessionId.clear();
+	m_voiceToken.clear();
+	m_voiceEndpoint.clear();
+	m_voiceConnectedToken.clear();
+	m_voiceConnectedEndpoint.clear();
+	m_bVoiceHaveState = false;
+	m_bVoiceHaveServer = false;
+
+	if (wasInVoice)
+		GetFrontend()->OnVoiceDisconnect();
+}
+
+void DiscordInstance::TryConnectVoice()
+{
+	if (!m_voiceChannel || !m_bVoiceHaveState || !m_bVoiceHaveServer)
+		return;
+
+	// The gateway may repeat a VOICE_SERVER_UPDATE without anything having changed.
+	if (m_voiceToken == m_voiceConnectedToken && m_voiceEndpoint == m_voiceConnectedEndpoint)
+		return;
+
+	m_voiceConnectedToken = m_voiceToken;
+	m_voiceConnectedEndpoint = m_voiceEndpoint;
+
+	VoiceConnectParams params;
+	params.m_guildId   = m_voiceGuild;
+	params.m_channelId = m_voiceChannel;
+	params.m_userId    = m_mySnowflake;
+	params.m_sessionId = m_voiceSessionId;
+	params.m_token     = m_voiceToken;
+	params.m_endpoint  = m_voiceEndpoint;
+
+	GetFrontend()->OnVoiceConnect(params);
+}
+
+bool DiscordInstance::JoinVoiceChannel(Snowflake guild, Snowflake channel)
+{
+	if (!IsGatewayConnected() || !m_mySnowflake)
+		return false;
+
+	if (m_voiceChannel == channel)
+		return true;
+
+	Channel* pChan = GetChannel(channel);
+	if (!pChan)
+		return false;
+
+	if (guild == 0)
+	{
+		// Calls only exist in DMs and group DMs.
+		if (!pChan->IsDM())
+			return false;
+	}
+	else
+	{
+		if (!pChan->IsVoice() || pChan->m_parentGuild != guild)
+			return false;
+
+		if (!pChan->HasPermission(PERM_VIEW_CHANNEL) || !pChan->HasPermission(PERM_CONNECT))
+			return false;
+	}
+
+	// Switching channels.  The previous voice session is dropped by the frontend, the gateway
+	// will move us to the new channel.
+	ResetVoiceConnection();
+
+	m_voiceGuild = guild;
+	m_voiceChannel = channel;
+	m_voiceSessionId = m_sessionId;
+	SendVoiceStateUpdate();
+
+	GetFrontend()->OnVoiceStatesChanged(guild, channel);
+	return true;
+}
+
+void DiscordInstance::LeaveVoiceChannel()
+{
+	if (!m_voiceChannel)
+		return;
+
+	Snowflake guild = m_voiceGuild, channel = m_voiceChannel;
+
+	// Tell the gateway first: it needs to know which guild we were in.
+	Json d;
+	d["guild_id"]   = guild ? Json(std::to_string(guild)) : Json(nullptr);
+	d["channel_id"] = nullptr;
+	d["self_mute"]  = m_bVoiceSelfMute || m_bVoiceSelfDeaf;
+	d["self_deaf"]  = m_bVoiceSelfDeaf;
+	d["self_video"] = false;
+
+	Json j;
+	j["op"] = GatewayOp::VOICE_STATE_UPDATE;
+	j["d"] = d;
+
+	if (IsGatewayConnected())
+		GetWebsocketClient()->SendMsg(m_gatewayConnId, j.dump());
+
+	ResetVoiceConnection();
+
+	// The gateway echoes this back, but there's no reason to wait for it.
+	VoiceState vs;
+	vs.m_userId = m_mySnowflake;
+	vs.m_guildId = guild;
+	m_voiceStates.Update(vs);
+
+	GetFrontend()->OnVoiceStatesChanged(guild, channel);
+}
+
+void DiscordInstance::SetVoiceSelfState(bool mute, bool deaf)
+{
+	m_bVoiceSelfMute = mute;
+	m_bVoiceSelfDeaf = deaf;
+
+	if (m_voiceChannel && IsGatewayConnected())
+		SendVoiceStateUpdate();
+}
+
+bool DiscordInstance::StartCall(Snowflake channel)
+{
+	bool nobodyThere = m_voiceStates.GetUserCountInChannel(channel) == 0;
+
+	if (!JoinVoiceChannel(0, channel))
+		return false;
+
+	if (nobodyThere)
+	{
+		// Make the other participants' devices ring.
+		Json j;
+		j["recipients"] = nullptr;
+
+		GetHTTPClient()->PerformRequest(
+			true,
+			NetRequest::POST_JSON,
+			GetDiscordAPI() + "channels/" + std::to_string(channel) + "/call/ring",
+			DiscordRequest::CALL_RING,
+			channel,
+			j.dump(),
+			m_token
+		);
+	}
+
+	return true;
+}
+
+void DiscordInstance::OnVoiceEngineStopped()
+{
+	LeaveVoiceChannel();
+}
+
+void DiscordInstance::HandleVOICE_STATE_UPDATE(Json& j)
+{
+	Json& d = j["d"];
+
+	VoiceState vs;
+	vs.Load(d);
+
+	Snowflake oldChannel = m_voiceStates.Update(vs);
+
+	if (vs.m_userId == m_mySnowflake)
+	{
+		// The same account may be in voice on another device, only our own session counts.
+		bool bOurSession = GetFieldSafe(d, "session_id") == m_sessionId;
+
+		if (bOurSession && m_voiceChannel)
+		{
+			if (vs.m_channelId == 0)
+			{
+				// Disconnected by someone else, or the channel went away.
+				ResetVoiceConnection();
+			}
+			else
+			{
+				m_voiceSessionId = m_sessionId;
+				m_bVoiceHaveState = true;
+
+				// Moved to a different channel.  The voice connection stays up.
+				if (vs.m_channelId != m_voiceChannel)
+				{
+					m_voiceGuild = vs.m_guildId;
+					m_voiceChannel = vs.m_channelId;
+				}
+
+				TryConnectVoice();
+			}
+		}
+	}
+
+	if (oldChannel && oldChannel != vs.m_channelId)
+		GetFrontend()->OnVoiceStatesChanged(vs.m_guildId, oldChannel);
+
+	if (vs.m_channelId)
+		GetFrontend()->OnVoiceStatesChanged(vs.m_guildId, vs.m_channelId);
+}
+
+void DiscordInstance::HandleVOICE_SERVER_UPDATE(Json& j)
+{
+	Json& d = j["d"];
+
+	if (!m_voiceChannel)
+		return;
+
+	Snowflake guild = GetSnowflake(d, "guild_id");
+	Snowflake channel = GetSnowflake(d, "channel_id");
+
+	// Calls identify themselves by their channel, guild voice channels by their guild.
+	if (guild) {
+		if (guild != m_voiceGuild)
+			return;
+	}
+	else {
+		if (channel != m_voiceChannel)
+			return;
+	}
+
+	std::string endpoint = GetFieldSafe(d, "endpoint");
+	if (endpoint.empty())
+		// The server went away and Discord is looking for a new one.  A new update will follow.
+		return;
+
+	m_voiceToken = GetFieldSafe(d, "token");
+	m_voiceEndpoint = endpoint;
+	m_bVoiceHaveServer = true;
+
+	TryConnectVoice();
+}
+
+void DiscordInstance::HandleCALL_CREATE(Json& j)
+{
+	Json& d = j["d"];
+	Snowflake channel = GetSnowflake(d, "channel_id");
+	if (!channel)
+		return;
+
+	m_voiceStates.RemoveChannel(channel);
+
+	if (d.contains("voice_states") && d["voice_states"].is_array())
+	{
+		for (auto& vsj : d["voice_states"])
+		{
+			VoiceState vs;
+			vs.Load(vsj, 0);
+
+			if (!vs.m_channelId)
+				vs.m_channelId = channel;
+
+			if (vs.m_userId)
+				m_voiceStates.Update(vs);
+		}
+	}
+
+	GetFrontend()->OnVoiceStatesChanged(0, channel);
+
+	// A call that starts with us on the list of those who are being rung (updates of the call
+	// repeat that list, so they don't count).
+	bool bNewCall = GetFieldSafe(j, "t") == "CALL_CREATE";
+	if (bNewCall && !IsInVoice() && d.contains("ringing") && d["ringing"].is_array())
+	{
+		for (auto& ringing : d["ringing"])
+		{
+			if (GetSnowflakeFromJsonObject(ringing) == m_mySnowflake) {
+				GetFrontend()->OnIncomingCall(channel);
+				break;
+			}
+		}
+	}
+}
+
+void DiscordInstance::HandleCALL_UPDATE(Json& j)
+{
+	HandleCALL_CREATE(j);
+}
+
+void DiscordInstance::HandleCALL_DELETE(Json& j)
+{
+	Json& d = j["d"];
+	Snowflake channel = GetSnowflake(d, "channel_id");
+	if (!channel)
+		return;
+
+	m_voiceStates.RemoveChannel(channel);
+
+	if (m_voiceChannel == channel)
+		ResetVoiceConnection();
+
+	GetFrontend()->OnVoiceStatesChanged(0, channel);
 }

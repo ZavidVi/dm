@@ -612,6 +612,7 @@
     <ClInclude Include="..\src\core\state\NotificationManager.hpp" />
     <ClInclude Include="..\src\core\state\ProfileCache.hpp" />
     <ClInclude Include="..\src\core\state\UserGuildSettings.hpp" />
+    <ClInclude Include="..\src\core\state\VoiceState.hpp" />
     <ClInclude Include="..\src\core\text\FormattedText.hpp" />
     <ClInclude Include="..\src\core\text\TextInterface.hpp" />
     <ClInclude Include="..\src\core\utils\Emoji.hpp" />
@@ -658,6 +659,7 @@
     <ClInclude Include="..\src\windows\TextToSpeech.hpp" />
     <ClInclude Include="..\src\windows\ShellNotification.hpp" />
     <ClInclude Include="..\src\windows\UploadDialog.hpp" />
+    <ClInclude Include="..\src\windows\VoicePanel.hpp" />
     <ClInclude Include="..\src\windows\ProgressDialog.hpp" />
     <ClInclude Include="..\src\windows\WindowMessages.hpp" />
     <ClInclude Include="..\src\windows\WinUtils.hpp" />
@@ -688,6 +690,7 @@
     <ClCompile Include="..\src\core\state\NotificationManager.cpp" />
     <ClCompile Include="..\src\core\state\ProfileCache.cpp" />
     <ClCompile Include="..\src\core\state\UserGuildSettings.cpp" />
+    <ClCompile Include="..\src\core\state\VoiceState.cpp" />
     <ClCompile Include="..\src\core\text\FormattedText.cpp" />
     <ClCompile Include="..\src\core\utils\Emoji.cpp" />
     <ClCompile Include="..\src\core\utils\UpdateChecker.cpp" />
@@ -730,8 +733,28 @@
     <ClCompile Include="..\src\windows\TextManager.cpp" />
     <ClCompile Include="..\src\windows\TextToSpeech.cpp" />
     <ClCompile Include="..\src\windows\UploadDialog.cpp" />
+    <ClCompile Include="..\src\windows\VoicePanel.cpp" />
     <ClCompile Include="..\src\windows\WinUtils.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\src\voice\VoiceEngine.hpp" />
+    <ClCompile Include="..\src\voice\VoiceEngine.cpp" />
+  </ItemGroup>
+  <!-- Voice support is only part of the build with /p:EnableVoice=true, see Voice.props. -->
+  <ItemGroup Condition="'$(EnableVoice)'=='true'">
+    <ClInclude Include="..\src\voice\VoiceAudio.hpp" />
+    <ClInclude Include="..\src\voice\VoiceConnection.hpp" />
+    <ClInclude Include="..\src\voice\VoiceCrypto.hpp" />
+    <ClInclude Include="..\src\voice\VoiceDave.hpp" />
+    <ClInclude Include="..\src\voice\VoiceSync.hpp" />
+    <ClInclude Include="..\src\voice\VoiceWebsocket.hpp" />
+    <ClCompile Include="..\src\voice\VoiceAudio.cpp" />
+    <ClCompile Include="..\src\voice\VoiceConnection.cpp" />
+    <ClCompile Include="..\src\voice\VoiceCrypto.cpp" />
+    <ClCompile Include="..\src\voice\VoiceDave.cpp" />
+    <ClCompile Include="..\src\voice\VoiceWebsocket.cpp" />
+  </ItemGroup>
+  <Import Project="Voice.props" Condition="'$(EnableVoice)'=='true'" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

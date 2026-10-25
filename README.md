@@ -187,6 +187,7 @@ section.
 - Embeds (6)
 - Showing profile pictures in DM list
 - User notes
+- Voice channels and calls in DMs and group DMs (9)
 
 ### Unimplemented but planned
 
@@ -194,7 +195,6 @@ section.
 - Viewing member list in group messages and DMs
 - Dark mode on modern systems (3)
 - Using an asynchronous HTTP library (4)
-- Entering voice channels (5)
 - Blocking, closing DMs, removing as friend
 - Muting channels
 - Changing nickname
@@ -219,13 +219,71 @@ section.
 
 4. Currently, we are using a synchronous HTTP library, with threads to simulate async behavior.
 
-5. Planned for far in the future.
+5. (Unused.)
 
 6. Embeds are incomplete, for example, fields don't function properly.
 
 7. Action is weighted by Discord's anti-spam measures. It could cause the target to get autobanned.
 
 8. Some code already exists, but this feature is unfinished and will probably never be finished.
+
+9. Voice needs a build with voice support, which is optional.  See [Voice support](#voice-support).
+
+## Voice support
+
+Discord Messenger can join voice channels and the calls in DMs and group DMs.  Double click a voice
+channel in the channel list to join it, or use the Actions menu (*Join Voice Channel*, *Start Call*,
+*Leave Voice / Hang Up*).  A small window shows who is in the channel and who is talking, and has the
+buttons to mute, deafen and disconnect.  Mute and deafen are in the Account menu as well.
+
+Audio is sent when the microphone picks up speech (there is no push-to-talk yet).  Video and screen
+sharing are not supported.
+
+Voice is optional, because it needs more than the rest of the program does:
+
+- [Opus](https://opus-codec.org/) for the audio (`deps/opus`),
+- DAVE, Discord's end-to-end encryption of voice, which has been mandatory for all calls since March
+  2026 (`deps/libdave`, which in turn needs the MLS library in `deps/mlspp`),
+- a compiler that can do C++17 (Visual Studio 2017 or newer), as DAVE does,
+- Windows XP or newer.
+
+Builds without it, such as the ones for the oldest Windows versions, work as before, and tell you that
+voice is not available when you try to use it.
+
+### Building with voice support
+
+1. Check out the submodules, with `git submodule update --init`.  (Do not use `--recursive`, mlspp
+   refers to a copy of vcpkg that is not needed here.)
+
+2. Build the libraries with CMake, using the same OpenSSL as the rest of the program (the first
+   argument is `x64` or `x86`):
+```
+build-voice-deps.cmd x64 [path to OpenSSL]
+```
+This puts the libraries in `build-voice\x64\lib\Debug` and `\Release`.
+
+3. Build the Visual Studio project with voice enabled:
+```
+msbuild vs\DiscordMessenger.sln /p:Configuration=Release /p:Platform=x64 /p:EnableVoice=true
+```
+(Or set the `EnableVoice` property to `true` in the environment before opening the solution.)
+
+For MinGW, build the libraries on your own, and run make with `VOICE=yes VOICE_LIB_DIR=[where they are]`.
+
+### How it works
+
+The main gateway tells the client who is in which voice channel (`VOICE_STATE_UPDATE`), and, after
+asking to join with the *Voice State Update* opcode, where to connect (`VOICE_SERVER_UPDATE`).  That
+is in `src/core/DiscordInstance.cpp`.  The voice engine itself lives in `src/voice`:
+
+- `VoiceConnection` runs a voice session: the voice gateway websocket (`VoiceWebsocket`), the UDP
+  socket that the audio travels on, and the audio threads.  Audio is encoded with Opus.
+- `VoiceCrypto` implements the transport encryption (`aead_aes256_gcm_rtpsize` and
+  `aead_xchacha20_poly1305_rtpsize`).
+- `VoiceDave` drives libdave: the MLS handshake that goes over the voice gateway, and encryption and
+  decryption of the frames.
+- `VoiceAudio` captures and plays audio with `waveIn` / `waveOut`.
+- `VoiceEngine` is what the rest of the program sees.  `src/windows/VoicePanel.cpp` is the interface.
 
 ## Compiling OpenSSL for older Windows versions
 

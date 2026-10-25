@@ -19,6 +19,7 @@
 #include "models/Relationship.hpp"
 #include "state/NotificationManager.hpp"
 #include "state/UserGuildSettings.hpp"
+#include "state/VoiceState.hpp"
 #include "models/GuildListItem.hpp"
 #include "text/FormattedText.hpp"
 
@@ -217,6 +218,24 @@ public:
 
 	// List of guilds and guild folders.
 	GuildItemList m_guildItemList;
+
+	// Who is in which voice channel or call.
+	VoiceStateManager m_voiceStates;
+
+	// The voice channel (or DM call) that we are in, or are trying to get into.  Zero if none.
+	Snowflake m_voiceGuild = 0;
+	Snowflake m_voiceChannel = 0;
+	bool m_bVoiceSelfMute = false;
+	bool m_bVoiceSelfDeaf = false;
+
+	// Collected from the gateway events in order to connect to the voice server.
+	std::string m_voiceSessionId;
+	std::string m_voiceToken;
+	std::string m_voiceEndpoint;
+	std::string m_voiceConnectedToken;    // the token / endpoint pair that the frontend has been told to use
+	std::string m_voiceConnectedEndpoint;
+	bool m_bVoiceHaveState = false;
+	bool m_bVoiceHaveServer = false;
 
 public:
 	Profile* GetProfile() {
@@ -493,6 +512,48 @@ public:
 	// Resolves links automatically in a formatted message.
 	void ResolveLinks(FormattedText* message, std::vector<InteractableItem>& interactables, Snowflake guildID = 0);
 
+	// ---- Voice ----
+
+	VoiceStateManager& GetVoiceStates() {
+		return m_voiceStates;
+	}
+
+	// Check if we are connected to, or in the middle of connecting to, a voice channel or call.
+	bool IsInVoice() const {
+		return m_voiceChannel != 0;
+	}
+
+	Snowflake GetVoiceChannelID() const {
+		return m_voiceChannel;
+	}
+
+	Snowflake GetVoiceGuildID() const {
+		return m_voiceGuild;
+	}
+
+	bool IsVoiceSelfMuted() const {
+		return m_bVoiceSelfMute;
+	}
+
+	bool IsVoiceSelfDeafened() const {
+		return m_bVoiceSelfDeaf;
+	}
+
+	// Join a voice channel (guild != 0) or the call in a DM or group DM (guild == 0).
+	bool JoinVoiceChannel(Snowflake guild, Snowflake channel);
+
+	// Leave the voice channel or call that we are in, if any.
+	void LeaveVoiceChannel();
+
+	// Mute and/or deafen ourselves.  Deafening implies muting while it lasts.
+	void SetVoiceSelfState(bool mute, bool deaf);
+
+	// Join the call in a DM or group DM and make the other participants' phones ring.
+	bool StartCall(Snowflake channel);
+
+	// The voice engine lost the connection for good and wants us out of the channel.
+	void OnVoiceEngineStopped();
+
 public:
 	DiscordInstance(std::string token) : m_token(token), m_notificationManager(this) {
 		InitDispatchFunctions();
@@ -550,6 +611,17 @@ private:
 	void HandleTYPING_START(nlohmann::json& j);
 	void HandlePRESENCE_UPDATE(nlohmann::json& j);
 	void HandlePASSIVE_UPDATE_V1(nlohmann::json& j);
+	void HandleVOICE_STATE_UPDATE(nlohmann::json& j);
+	void HandleVOICE_SERVER_UPDATE(nlohmann::json& j);
+	void HandleCALL_CREATE(nlohmann::json& j);
+	void HandleCALL_UPDATE(nlohmann::json& j);
+	void HandleCALL_DELETE(nlohmann::json& j);
+
+	// Voice helpers
+	void SendVoiceStateUpdate();
+	void ResetVoiceConnection();
+	void TryConnectVoice();
+	void LoadGuildVoiceStates(Snowflake guild, nlohmann::json& voiceStates);
 
 private:
 	void HandleGuildMemberListUpdate_Sync(Snowflake guild, nlohmann::json& j);

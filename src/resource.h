@@ -548,12 +548,33 @@
 #define IDA_GUILD_8                     1315
 #define IDA_GUILD_9                     1316
 
+#define ID_ACTIONS_JOINVOICE            1112
+#define ID_ACTIONS_STARTCALL            1113
+#define ID_ACTIONS_LEAVEVOICE           1114
+#define IDS_VOICE_TITLE                 779
+#define IDS_VOICE_CONNECTING            780
+#define IDS_VOICE_CONNECTED             781
+#define IDS_VOICE_RECONNECTING          782
+#define IDS_VOICE_MUTE                  783
+#define IDS_VOICE_UNMUTE                784
+#define IDS_VOICE_DEAFEN                785
+#define IDS_VOICE_UNDEAFEN              786
+#define IDS_VOICE_DISCONNECT            787
+#define IDS_VOICE_NOT_AVAILABLE         788
+#define IDS_VOICE_ERROR                 789
+#define IDS_VOICE_NO_MICROPHONE         790
+#define IDS_VOICE_CALL_WITH             791
+#define IDS_VOICE_MUTED_SUFFIX          792
+#define IDS_VOICE_DEAFENED_SUFFIX       793
+#define IDS_VOICE_NO_PERMISSION         794
+#define IDS_VOICE_INCOMING_CALL         795
+
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        106
-#define _APS_NEXT_COMMAND_VALUE         1112
+#define _APS_NEXT_COMMAND_VALUE         1115
 #define _APS_NEXT_CONTROL_VALUE         918
 #define _APS_NEXT_SYMED_VALUE           40000
 #endif

@@ -22,6 +22,9 @@ public:
 	virtual void RemoveCategoryIfNeeded(const Channel& channel) = 0;
 	virtual void CommitChannels() = 0;
 
+	// Called when people join or leave a voice channel, to show how many there are.
+	virtual void UpdateVoiceUsers(Snowflake channel) {}
+
 	// these are only used for checking if character events should be redirected
 	// so, these can be the same for all it cares
 	virtual HWND GetListHWND() = 0;

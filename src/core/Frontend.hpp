@@ -8,6 +8,7 @@
 #include "models/ScrollDir.hpp"
 #include "models/Message.hpp"
 #include "network/HTTPClient.hpp"
+#include "state/VoiceState.hpp"
 #include "utils/Util.hpp"
 
 // Cross platform interface between the DiscordInstance and the actual front-end.
@@ -39,6 +40,19 @@ public:
 	virtual bool OnUpdateProgress(Snowflake key, size_t offset, size_t length) = 0;
 	virtual void OnStopProgress(Snowflake key) = 0;
 	virtual void OnNotification() = 0;
+
+	// Voice events
+	//
+	// OnVoiceStatesChanged is called when someone joined, left or changed their state in a voice
+	// channel or call.  OnVoiceConnect is called when the gateway has given us everything needed to
+	// connect to a voice server (it may be called again if the server changes while connected).
+	// OnVoiceDisconnect is called when the voice session should be torn down.
+	virtual void OnVoiceStatesChanged(Snowflake guildID, Snowflake channelID) = 0;
+	virtual void OnVoiceConnect(const VoiceConnectParams& params) = 0;
+	virtual void OnVoiceDisconnect() = 0;
+
+	// Someone is calling us in a DM or group DM, and we're not in a call already.
+	virtual void OnIncomingCall(Snowflake channelID) = 0;
 
 	// Error messages
 	virtual void OnGenericError(const std::string& message) = 0;

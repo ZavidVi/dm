@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Settings for building Discord Messenger with voice support (voice channels and calls).
+
+  Imported by DiscordMessenger.vcxproj when it is built with /p:EnableVoice=true.  The libraries it
+  links against are made by voice-deps/CMakeLists.txt, see build-voice-deps.cmd, and end up in
+  build-voice/<platform>/lib/<Debug|Release>.  Pass /p:VoiceDepsDir=<dir> to look elsewhere.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <VoicePlatform>$(Platform)</VoicePlatform>
+    <VoicePlatform Condition="'$(Platform)'=='Win32'">x86</VoicePlatform>
+    <VoiceDepsDir Condition="'$(VoiceDepsDir)'==''">$(SolutionDir)..\build-voice\$(VoicePlatform)</VoiceDepsDir>
+    <VoiceLibConfig>Debug</VoiceLibConfig>
+    <VoiceLibConfig Condition="$(Configuration.StartsWith('Release'))">Release</VoiceLibConfig>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>ENABLE_VOICE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\deps\opus\include;$(SolutionDir)..\deps\libdave\cpp\includes;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(VoiceDepsDir)\lib\$(VoiceLibConfig);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opus.lib;libdave.lib;mlspp.lib;hpke.lib;bytes.lib;tls_syntax.lib;winmm.lib;crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>
